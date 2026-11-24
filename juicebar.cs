@@ -39,7 +39,7 @@ using Windows.Storage.Streams;
 [assembly: System.Reflection.AssemblyCopyright("Copyright (c) 2026 caiquebmaso - MIT")]
 [assembly: System.Reflection.AssemblyVersion("1.1.0.0")]
 [assembly: System.Reflection.AssemblyFileVersion("1.1.0.0")]
-[assembly: System.Reflection.AssemblyInformationalVersion("1.1.0-beta")]
+[assembly: System.Reflection.AssemblyInformationalVersion("1.1.0-beta.2")]
 
 // ================================================================ modelo
 enum Tipo { Fone, Mouse, Teclado, Controle, Outro }
