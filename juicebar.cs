@@ -37,9 +37,9 @@ using Windows.Storage.Streams;
 [assembly: System.Reflection.AssemblyProduct("Juicebar")]
 [assembly: System.Reflection.AssemblyDescription("Bateria dos aparelhos sem fio na barra de tarefas")]
 [assembly: System.Reflection.AssemblyCopyright("Copyright (c) 2026 caiquebmaso - MIT")]
-[assembly: System.Reflection.AssemblyVersion("1.1.0.0")]
-[assembly: System.Reflection.AssemblyFileVersion("1.1.0.0")]
-[assembly: System.Reflection.AssemblyInformationalVersion("1.1.0")]
+[assembly: System.Reflection.AssemblyVersion("1.1.1.0")]
+[assembly: System.Reflection.AssemblyFileVersion("1.1.1.0")]
+[assembly: System.Reflection.AssemblyInformationalVersion("1.1.1")]
 
 // ================================================================ modelo
 enum Tipo { Fone, Mouse, Teclado, Controle, Outro }
@@ -120,7 +120,9 @@ static class Windows_
             var gr = new Grupo { Cont = g.Key };
             gr.Nome = raiz != null && !string.IsNullOrEmpty(raiz.Nome) ? raiz.Nome : (comBat != null ? comBat.Nome : "Aparelho");
             gr.Bat = comBat != null ? comBat.Bat : -1;
-            var con = lista.Where(x => x.Conectado.HasValue).ToList();
+            // vale o estado dos nos Bluetooth: a saida de audio (SWD\MMDEVAPI) fica "conectada" com o fone desligado
+            var con = lista.Where(x => x.Conectado.HasValue && x.Inst.StartsWith("BTH", StringComparison.OrdinalIgnoreCase)).ToList();
+            if (con.Count == 0) con = lista.Where(x => x.Conectado.HasValue).ToList();
             gr.Conectado = con.Count == 0 || con.Any(x => x.Conectado.Value);
             if (lista.Any(x => x.Classe == C_MOUSE)) gr.Tipo = Tipo.Mouse;
             else if (lista.Any(x => x.Classe == C_TECLADO)) gr.Tipo = Tipo.Teclado;
@@ -1294,9 +1296,14 @@ class Coletor
             {
                 a.Fonte = "Fast Pair";
                 a.Tipo = Tipo.Fone;
-                a.Valores.Add(V("E", casado.Bat[0], true));
-                a.Valores.Add(V("D", casado.Bat[1], true));
-                a.Valores.Add(V("Estojo", casado.Bat[2], false));
+                var lados = Lados(a.Id, casado.Bat);
+                if (lados[0] == 0x7F && lados[1] == 0x7F) a.Valores.Add(new Valor { Rotulo = "", Nivel = g.Bat });
+                else
+                {
+                    if (lados[0] != 0x7F) a.Valores.Add(V("E", lados[0], true));
+                    if (lados[1] != 0x7F) a.Valores.Add(V("D", lados[1], true));
+                }
+                if (lados[2] != 0x7F) a.Valores.Add(V("Estojo", lados[2], false));
             }
             else a.Valores.Add(new Valor { Rotulo = "", Nivel = g.Bat });
             lista.Add(a);
@@ -1305,6 +1312,25 @@ class Coletor
         Aparelhos = lista.OrderBy(x => x.Tipo).ThenBy(x => x.Nome).ToList();
         Atualizado = DateTime.Now;
         if (Mudou != null) Mudou();
+    }
+
+    // O Fast Pair as vezes anuncia um lado como desconhecido (0x7F): no estojo, longe ou entre anuncios.
+    // Fica o ultimo valor conhecido de cada lado por 10 min; sem nenhum, o lado nao aparece.
+    readonly Dictionary<string, Tuple<byte, DateTime>> ultimoLado = new Dictionary<string, Tuple<byte, DateTime>>();
+
+    byte[] Lados(string id, byte[] bat)
+    {
+        var r = new byte[3];
+        for (int k = 0; k < 3; k++) r[k] = Lado(id + "|" + k, bat[k]);
+        return r;
+    }
+
+    byte Lado(string chave, byte b)
+    {
+        if ((b & 0x7F) <= 100) { ultimoLado[chave] = Tuple.Create(b, DateTime.Now); return b; }
+        Tuple<byte, DateTime> u;
+        if (ultimoLado.TryGetValue(chave, out u) && (DateTime.Now - u.Item2).TotalMinutes < 10) return u.Item1;
+        return 0x7F;
     }
 
     static Valor V(string r, byte b, bool naBarra)
