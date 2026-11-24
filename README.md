@@ -106,6 +106,7 @@ O Juicebar só lê: não conecta, não pareia e não grava nada nos aparelhos. N
    - **Logitech HID++** (Lightspeed, Unifying, Bolt e aparelhos Logitech por cabo). No Unifying, aparelho que não informa o próprio nome (ex.: K270) aparece com o nome e o tipo que o receptor guardou no pareamento;
    - **Razer** (relatório de 90 bytes da marca);
    - **Compx** (VID 3554), pelo mesmo protocolo do driver `hid-pulsar` do Linux. Mouse dormindo não responde: fica a última leitura por 5 min.
+   - **Attack Shark X3** (1D57:FA60 e FA61): só lê os avisos de tensão que o receptor manda sozinho a cada 2 s e converte pela curva do projeto [Attack-Shark-X3](https://github.com/prodmutant/Attack-Shark-X3) (MIT). Nunca escreve na coleção de configuração.
 
    Cada aparelho USB tem prazo para responder; o que travar é pulado por 10 min e aparece como "TRAVOU" no diagnóstico, sem segurar a barra.
 
