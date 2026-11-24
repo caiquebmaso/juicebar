@@ -30,7 +30,7 @@ Na barra, à esquerda do clima e da área de notificação:
 - cada aparelho conectado tem o seu ícone (fone, mouse, teclado, controle) e uma pilha com a porcentagem, um ao lado do outro;
 - cores: branco acima de 40%, laranja até 40%, vermelho até 20%, verde carregando; o ícone pega a cor do nível mais baixo do aparelho;
 - passar o mouse mostra todos os aparelhos, cada lado do fone, o estojo e a hora da leitura;
-- clique esquerdo abre a janela de detalhes; clique direito tem Detalhes, Procurar atualizações, Copiar diagnóstico, Iniciar com o Windows e Sair;
+- clique esquerdo abre a janela de detalhes; clique direito tem Detalhes, Procurar atualizações, Copiar diagnóstico, Iniciar com o Windows, **Troquei as pilhas** (só aparece com aparelho que informa a bateria por faixa, ver abaixo) e Sair;
 - sem nenhum aparelho com bateria conectado, fica só um ícone de Bluetooth apagado.
 
 ### Atualizações
@@ -62,7 +62,16 @@ O `juicebar.ico` é gerado pelo `tools\gerar-icone.ps1` (cada tamanho desenhado 
 4. **USB e receptores 2.4 GHz** (a cada 1 min). No 2.4 GHz não existe um padrão único: cada marca passa a bateria pelo receptor do seu jeito. O Juicebar tenta, em ordem:
    - o **padrão USB de bateria** (HID, Battery Strength), que vale para qualquer marca que o siga;
    - **Logitech** (Lightspeed, Unifying, Bolt e aparelhos Logitech por cabo), pelo protocolo HID++, inclusive com o G HUB aberto;
-   - **Razer** (receptores HyperSpeed e aparelhos sem fio da marca), pelo protocolo de relatórios da Razer.
+   - **Razer** (receptores HyperSpeed e aparelhos sem fio da marca), pelo protocolo de relatórios da Razer;
+   - **Compx** (receptores VID 3554, como os dos mouses Redragon K1NG M916 Pro, Kysona, Pulsar e ATK/VXE), pelo mesmo protocolo do driver `hid-pulsar` do Linux. Mouse dormindo não responde: fica a última leitura por 5 min.
+
+   No Logitech Unifying, aparelho que não informa o próprio nome (ex.: teclado K270) aparece com o nome e o tipo que o receptor guardou no pareamento.
+
+### Bateria por faixa (teclados Logitech a pilha, como o K270)
+
+Alguns aparelhos Logitech não dão a porcentagem exata, só a faixa (100, 70, 20, 5...). Com a pilha fraca, a faixa muda com o uso: parado o teclado diz 70%, digitando cai para 20%, porque a tensão da pilha cede quando o rádio puxa corrente. Por isso o Juicebar mostra **a menor leitura das últimas 12 horas**, que é a que diz quando a pilha vai acabar. Essa leitura fica gravada em `%LOCALAPPDATA%\Juicebar\faixas.txt` e continua valendo depois de reiniciar.
+
+Depois de trocar as pilhas, clique direito > **Troquei as pilhas (zerar menor leitura)**: ele esquece a leitura guardada e lê os receptores na hora. Sem isso, o valor novo aparece sozinho depois de 12 horas sem leitura baixa.
 
 Tudo é só leitura: o programa não conecta, não pareia e não grava nada no aparelho. Nos receptores ele só faz perguntas de leitura (versão, nome, bateria).
 
@@ -73,7 +82,7 @@ Tudo é só leitura: o programa não conecta, não pareia e não grava nada no a
 
 ## Testes
 
-`juicebar.exe --testar arquivo.txt` confere a leitura de cada protocolo com respostas montadas byte a byte pela documentação (Logitech, Razer, padrão USB, Fast Pair) e a comparação de versões. O código de saída é o número de falhas.
+`juicebar.exe --testar arquivo.txt` confere a leitura de cada protocolo com respostas montadas byte a byte pela documentação (Logitech, Razer, Compx, padrão USB, Fast Pair) e a comparação de versões. O código de saída é o número de falhas.
 
 `juicebar.exe --diagnostico arquivo.txt` grava o diagnóstico dos aparelhos USB e sai.
 
