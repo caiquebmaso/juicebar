@@ -30,7 +30,7 @@ body:
     attributes:
       label: Versão do Juicebar
       description: Aparece na primeira linha do diagnóstico.
-      placeholder: "Ex.: 1.1.0-beta"
+      placeholder: "Ex.: 1.1.0"
     validations:
       required: true
   - type: textarea

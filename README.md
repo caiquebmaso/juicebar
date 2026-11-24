@@ -10,7 +10,7 @@ Fones com Fast Pair do Google (por exemplo, vários modelos da JBL) aparecem com
 
 ## Instalar
 
-1. Baixe o `juicebar.exe` da [última versão](https://github.com/caiquebmaso/juicebar/releases/latest) (ou da beta mais recente, na lista de [releases](https://github.com/caiquebmaso/juicebar/releases)).
+1. Baixe o `juicebar.exe` da [última versão](https://github.com/caiquebmaso/juicebar/releases/latest).
 2. Coloque num lugar fixo, por exemplo `%LOCALAPPDATA%\Juicebar`, e abra com dois cliques.
 3. Para abrir sozinho com o Windows: clique direito no Juicebar na barra e marque **Iniciar com o Windows**.
 

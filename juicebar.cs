@@ -39,7 +39,7 @@ using Windows.Storage.Streams;
 [assembly: System.Reflection.AssemblyCopyright("Copyright (c) 2026 caiquebmaso - MIT")]
 [assembly: System.Reflection.AssemblyVersion("1.1.0.0")]
 [assembly: System.Reflection.AssemblyFileVersion("1.1.0.0")]
-[assembly: System.Reflection.AssemblyInformationalVersion("1.1.0-beta.2")]
+[assembly: System.Reflection.AssemblyInformationalVersion("1.1.0")]
 
 // ================================================================ modelo
 enum Tipo { Fone, Mouse, Teclado, Controle, Outro }
@@ -1431,11 +1431,8 @@ class Widget : Form
         checagem.Interval = 20000;
         checagem.Tick += (s, e) => { checagem.Interval = 6 * 3600 * 1000; ProcurarAtualizacao(false); };
 
-        MouseUp += (s, e) =>
-        {
-            if (e.Button == MouseButtons.Left) AbrirDetalhes();
-            else if (e.Button == MouseButtons.Right) menu.Show(Cursor.Position);
-        };
+        // clique direito vem pelo WM_CONTEXTMENU (ver WndProc), para a barra do Windows nao abrir o menu dela
+        MouseUp += (s, e) => { if (e.Button == MouseButtons.Left) AbrirDetalhes(); };
         MouseEnter += (s, e) => { sobre = true; Desenhar(); };
         MouseLeave += (s, e) => { sobre = false; Desenhar(); };
 
@@ -1449,6 +1446,30 @@ class Widget : Form
     }
 
     protected override bool ShowWithoutActivation { get { return true; } }
+
+    // A janela e filha da barra de tarefas: o WM_CONTEXTMENU que nao for tratado aqui sobe para
+    // a barra e o Windows abre o menu dele por cima do nosso. Trata e nao repassa.
+    protected override void WndProc(ref Message m)
+    {
+        if (m.Msg == 0x007B)                                  // WM_CONTEXTMENU
+        {
+            N.SetForegroundWindow(Handle);
+            menu.Show(Cursor.Position);
+            return;
+        }
+        base.WndProc(ref m);
+    }
+
+    // aviso sempre na frente (a barra nao e uma janela normal para ser dona de caixa de mensagem)
+    static DialogResult Aviso(string texto, MessageBoxButtons botoes, MessageBoxIcon icone)
+    {
+        using (var dono = new Form { TopMost = true, ShowInTaskbar = false, FormBorderStyle = FormBorderStyle.None, Size = new Size(1, 1), StartPosition = FormStartPosition.CenterScreen, Opacity = 0 })
+        {
+            dono.Show();
+            dono.Activate();
+            return MessageBox.Show(dono, texto, "Juicebar", botoes, icone);
+        }
+    }
 
     protected override void OnShown(EventArgs e)
     {
@@ -1478,8 +1499,8 @@ class Widget : Form
                     procurando = false;
                     if (erro == null) { Atualizador.Disponivel = r; Desenhar(); AtualizarDica(); }
                     if (!manual) return;
-                    if (erro != null) MessageBox.Show("Não consegui procurar atualizações agora.\n\n" + erro, "Juicebar", MessageBoxButtons.OK, MessageBoxIcon.Warning);
-                    else if (r == null) MessageBox.Show("Você já está na versão mais nova (" + Atualizador.Atual + ").", "Juicebar", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                    if (erro != null) Aviso("Não consegui procurar atualizações agora.\n\n" + erro, MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    else if (r == null) Aviso("Você já está na versão mais nova (" + Atualizador.Atual + ").", MessageBoxButtons.OK, MessageBoxIcon.Information);
                     else OferecerInstalar(r);
                 }));
             }
@@ -1490,24 +1511,49 @@ class Widget : Form
     void OferecerInstalar(Atualizador.Release r)
     {
         string txt = "Tem uma versão nova do Juicebar: " + r.Tag.TrimStart('v') + (r.Beta ? " (beta)" : "") + ".\nVocê está na " + Atualizador.Atual + ".\n\nAtualizar agora? O Juicebar fecha e abre de novo sozinho.";
-        var resp = MessageBox.Show(txt, "Juicebar", MessageBoxButtons.YesNoCancel, MessageBoxIcon.Question, MessageBoxDefaultButton.Button1);
+        var resp = Aviso(txt, MessageBoxButtons.YesNoCancel, MessageBoxIcon.Question);
         if (resp != DialogResult.Yes) return;
         Cursor = Cursors.WaitCursor;
         var erro = Atualizador.Instalar(r);
         Cursor = Cursors.Default;
         if (erro == null) { col.Parar(); Application.Exit(); return; }
-        if (MessageBox.Show("Não consegui atualizar sozinho: " + erro + "\n\nAbrir a página da versão nova para baixar?", "Juicebar", MessageBoxButtons.YesNo, MessageBoxIcon.Warning) == DialogResult.Yes && r.Pagina != null)
+        if (Aviso("Não consegui atualizar sozinho: " + erro + "\n\nAbrir a página da versão nova para baixar?", MessageBoxButtons.YesNo, MessageBoxIcon.Warning) == DialogResult.Yes && r.Pagina != null)
             try { Process.Start(r.Pagina); } catch { }
     }
 
+    bool diagnosticando;
+
+    // monta o diagnostico fora da tela (os receptores podem demorar) e copia quando termina
     void CopiarDiagnostico()
     {
-        Cursor = Cursors.WaitCursor;
-        string txt;
-        try { txt = col.Diagnostico(); } catch (Exception ex) { txt = "erro no diagnóstico: " + ex.Message; }
-        Cursor = Cursors.Default;
-        try { Clipboard.SetText(txt); } catch { }
-        MessageBox.Show("O diagnóstico foi copiado. Ele lista os aparelhos e receptores que o Juicebar achou e o que cada um respondeu.\n\nSe algum aparelho sem fio não aparece na barra, abra uma issue em github.com/caiquebmaso/juicebar/issues e cole o texto.", "Juicebar", MessageBoxButtons.OK, MessageBoxIcon.Information);
+        if (diagnosticando) return;
+        diagnosticando = true;
+        new Thread(() =>
+        {
+            string txt;
+            try { txt = col.Diagnostico(); } catch (Exception ex) { txt = "erro no diagnóstico: " + ex.Message; }
+            try
+            {
+                BeginInvoke(new Action(() =>
+                {
+                    diagnosticando = false;
+                    bool copiou = false;
+                    for (int i = 0; i < 5 && !copiou; i++)              // area de transferencia ocupada: tenta de novo
+                    {
+                        try { Clipboard.SetDataObject(txt, true, 3, 100); copiou = true; } catch { Thread.Sleep(150); }
+                    }
+                    if (copiou)
+                        Aviso("O diagnóstico foi copiado. Ele lista os aparelhos e receptores que o Juicebar achou e o que cada um respondeu.\n\nSe algum aparelho sem fio não aparece na barra, abra uma issue em github.com/caiquebmaso/juicebar/issues e cole o texto (Ctrl+V).", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                    else
+                    {
+                        var arq = Path.Combine(Path.GetTempPath(), "juicebar-diagnostico.txt");
+                        try { File.WriteAllText(arq, txt, System.Text.Encoding.UTF8); Process.Start("notepad.exe", "\"" + arq + "\""); } catch { }
+                        Aviso("Não consegui copiar para a área de transferência. O diagnóstico abriu no Bloco de Notas.", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+                    }
+                }));
+            }
+            catch { diagnosticando = false; }
+        }) { IsBackground = true, Name = "diagnostico" }.Start();
     }
 
     public static Bitmap PontoAmarelo(int t)
@@ -1843,6 +1889,7 @@ static class N
     [DllImport("gdi32.dll")] public static extern IntPtr SelectObject(IntPtr dc, IntPtr o);
     [DllImport("gdi32.dll")] public static extern bool DeleteObject(IntPtr o);
     [DllImport("user32.dll")] public static extern bool SetProcessDPIAware();
+    [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr h);
 }
 
 // ================================================================ atualizacoes (releases do GitHub)
@@ -2077,6 +2124,10 @@ static class Testes
         var fp = FastPair.Decodificar(new byte[] { 0x2C, 0xFE, 0x00, 0x33, 90, 35, 0x80 | 60 });
         Conferir("Fast Pair E/D/estojo", "5A-23-BC", fp == null ? "nada" : BitConverter.ToString(fp));
 
+        // Main em STA (sem isso a area de transferencia falha: "Copiar diagnostico" da 1.1.0-beta/beta.2)
+        var main = typeof(Programa).GetMethod("Main", System.Reflection.BindingFlags.Static | System.Reflection.BindingFlags.NonPublic);
+        Conferir("Main marcado com [STAThread]", true, main != null && main.GetCustomAttributes(typeof(STAThreadAttribute), false).Length == 1);
+
         // versoes
         Conferir("1.1.0 > 1.0.0", true, Versao.Comparar("v1.1.0", "1.0.0") > 0);
         Conferir("1.1.0 > 1.1.0-beta", true, Versao.Comparar("1.1.0", "1.1.0-beta") > 0);
@@ -2093,7 +2144,6 @@ static class Testes
 
 static class Programa
 {
-    [STAThread]
     static string Arg(string[] args, string nome)
     {
         int i = Array.FindIndex(args, a => a.Equals(nome, StringComparison.OrdinalIgnoreCase));
@@ -2101,6 +2151,7 @@ static class Programa
         return i + 1 < args.Length ? args[i + 1] : "";
     }
 
+    [STAThread]                              // area de transferencia e caixas de dialogo exigem STA
     static void Main(string[] args)
     {
         // --versao X: finge outra versao (para testar o aviso de atualizacao)

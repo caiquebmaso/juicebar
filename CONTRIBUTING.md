@@ -4,7 +4,7 @@ O jeito mais útil de ajudar é fazer o Juicebar ler a bateria de um aparelho qu
 
 ## 1. Mandar o diagnóstico (sem programar)
 
-1. Baixe o `juicebar.exe` da versão mais recente na página de [releases](https://github.com/caiquebmaso/juicebar/releases). Pode ser a beta.
+1. Baixe o `juicebar.exe` da versão mais recente na página de [releases](https://github.com/caiquebmaso/juicebar/releases/latest).
 2. Plugue o receptor, ligue o aparelho e abra o Juicebar.
 3. Clique direito no Juicebar na barra > **Copiar diagnóstico**.
 4. Abra uma [issue "Meu aparelho não aparece"](https://github.com/caiquebmaso/juicebar/issues/new?template=aparelho-nao-aparece.yml) e cole o texto.
