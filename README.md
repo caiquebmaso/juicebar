@@ -17,6 +17,7 @@ Fones com Fast Pair do Google (por exemplo, vários modelos da JBL) aparecem com
 | Logitech com receptor (Lightspeed, Unifying, Bolt) | pelo receptor, inclusive com o G HUB aberto |
 | Razer com receptor (HyperSpeed) | pelo receptor |
 | Redragon, Kysona, Pulsar, ATK/VXE com receptor Compx | pelo receptor |
+| Attack Shark X3 (receptor 2.4 GHz ou cabo) | pelo receptor |
 | Qualquer marca que siga o padrão USB de bateria | pelo receptor |
 
 Ainda não entram: Corsair, SteelSeries, HyperX e outras marcas com receptor próprio (cada modelo tem o seu protocolo e elas entram uma por vez), nem aparelhos com fio. Se o seu não aparece, veja [Aparelho não aparece?](#aparelho-não-aparece).
@@ -92,7 +93,7 @@ O Juicebar só lê: não conecta, não pareia e não grava nada nos aparelhos. N
 | Opção | O que faz |
 |---|---|
 | `--demo` | mostra fone, mouse e teclado de exemplo, sem ler nada (como na imagem acima) |
-| `--testar arquivo.txt` | confere a leitura de cada protocolo com respostas gravadas (Logitech, Razer, Compx, padrão USB, Fast Pair) e a comparação de versões; o código de saída é o número de falhas |
+| `--testar arquivo.txt` | confere a leitura de cada protocolo com respostas gravadas (Logitech, Razer, Compx, Attack Shark, padrão USB, Fast Pair) e a comparação de versões; o código de saída é o número de falhas |
 | `--diagnostico arquivo.txt` | grava o diagnóstico dos aparelhos USB e sai |
 
 ### De onde vem a bateria

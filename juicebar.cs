@@ -8,7 +8,7 @@
 //  3. Fast Pair do Google: fones que anunciam a bateria de cada lado (esquerdo, direito,
 //     estojo). So vale para fone conectado a este PC (casado pelo nome).
 //  4. USB e receptores 2.4 GHz: o padrao USB de bateria (HID) de qualquer marca e o protocolo
-//     HID++ da Logitech (Lightspeed, Unifying, Bolt). Receptor sem fio que ainda nao sabemos
+//     HID++ da Logitech (Lightspeed, Unifying, Bolt), Razer, Compx e Attack Shark X3. Receptor sem fio que ainda nao sabemos
 //     ler aparece em "Sem leitura ainda" e no diagnostico.
 //
 // Atualizacoes: procura versao nova nos releases do GitHub; com versao nova, ponto amarelo na barra.
@@ -37,9 +37,9 @@ using Windows.Storage.Streams;
 [assembly: System.Reflection.AssemblyProduct("Juicebar")]
 [assembly: System.Reflection.AssemblyDescription("Bateria dos aparelhos sem fio na barra de tarefas")]
 [assembly: System.Reflection.AssemblyCopyright("Copyright (c) 2026 caiquebmaso - MIT")]
-[assembly: System.Reflection.AssemblyVersion("1.1.1.0")]
-[assembly: System.Reflection.AssemblyFileVersion("1.1.1.0")]
-[assembly: System.Reflection.AssemblyInformationalVersion("1.1.1")]
+[assembly: System.Reflection.AssemblyVersion("1.2.0.0")]
+[assembly: System.Reflection.AssemblyFileVersion("1.2.0.0")]
+[assembly: System.Reflection.AssemblyInformationalVersion("1.2.0")]
 
 // ================================================================ modelo
 enum Tipo { Fone, Mouse, Teclado, Controle, Outro }
@@ -367,6 +367,12 @@ static class Hid
     public static SafeFileHandle Abrir(string caminho, bool rw, bool assincrono = false)
     {
         return CreateFileW(caminho, rw ? 0xC0000000u : 0u, 3, IntPtr.Zero, 3, assincrono ? 0x40000000u : 0u, IntPtr.Zero);
+    }
+
+    // so leitura, assincrono (para ler avisos que o aparelho manda sozinho)
+    public static SafeFileHandle AbrirLeitura(string caminho)
+    {
+        return CreateFileW(caminho, 0x80000000u, 3, IntPtr.Zero, 3, 0x40000000u, IntPtr.Zero);
     }
 
     // ---- padrao USB de bateria: Battery Strength (0x06/0x20) ou AbsoluteStateOfCharge (0x85/0x65)
@@ -791,6 +797,79 @@ static class Compx
     [DllImport("hid.dll")] static extern bool HidD_SetOutputReport(SafeFileHandle h, byte[] b, int n);
 }
 
+// ---- Attack Shark X3 (VID 1D57, PID FA60 receptor 2.4 GHz / FA61 cabo, chip Beken).
+// So leitura: a colecao de status (pagina 0x000A, input de 5 bytes) manda sozinha, a cada ~2 s,
+// 03 10 VV FF xx: VV = tensao em 1/16 V, FF bit 0 = na bateria (0 = cabo ligado). 03 10 03 00 FF
+// e um aviso vazio (descartado). Nada chega com o mouse dormindo. Nunca escrever na colecao de
+// configuracao (0x000B): ela grava na memoria do mouse. Fonte: github.com/prodmutant/Attack-Shark-X3 (MIT).
+static class AttackShark
+{
+    public static bool Eh(ushort vid, ushort pid) { return vid == 0x1D57 && (pid == 0xFA60 || pid == 0xFA61); }
+
+    // curva do projeto acima (V, %), ancorada em 4,00 V = 70% lido no programa da marca
+    static readonly double[,] CURVA = { { 3.27, 0 }, { 3.50, 3 }, { 3.60, 7 }, { 3.68, 12 }, { 3.72, 18 }, { 3.76, 26 }, { 3.80, 35 }, { 3.84, 45 },
+        { 3.88, 54 }, { 3.92, 61 }, { 3.96, 66 }, { 4.00, 70 }, { 4.05, 78 }, { 4.10, 85 }, { 4.15, 93 }, { 4.20, 100 } };
+
+    public static int PorTensao(double v)
+    {
+        if (v <= CURVA[0, 0]) return 0;
+        int n = CURVA.GetLength(0);
+        if (v >= CURVA[n - 1, 0]) return 100;
+        for (int k = 1; k < n; k++)
+            if (v <= CURVA[k, 0])
+            {
+                double t = (v - CURVA[k - 1, 0]) / (CURVA[k, 0] - CURVA[k - 1, 0]);
+                return (int)Math.Round(CURVA[k - 1, 1] + t * (CURVA[k, 1] - CURVA[k - 1, 1]));
+            }
+        return 100;
+    }
+
+    // um aviso -> nivel (-1 se a tensao for a do cabo), carregando, mV; false se nao for aviso de bateria valido
+    public static bool Decodificar(byte[] r, out int nivel, out bool carregando, out int mv)
+    {
+        nivel = -1; carregando = false; mv = 0;
+        if (r == null || r.Length < 4 || r[0] != 0x03 || r[1] != 0x10) return false;
+        double v = r[2] / 16.0;
+        if (v < 3.0 || v > 5.5) return false;                  // aviso vazio (03 10 03 00 FF) ou lixo
+        mv = (int)Math.Round(v * 1000);
+        bool naBateria = (r[3] & 0x01) != 0;
+        carregando = v > 4.35 || !naBateria;
+        nivel = v > 4.35 ? -1 : PorTensao(v);                  // acima de 4,35 V e a tensao do USB, nao da pilha
+        return true;
+    }
+
+    // le ate 5 avisos em ate 5 s e fica com a tensao que mais apareceu
+    public static bool Ler(Hid.Colecao c, out int nivel, out bool carregando, out int mv, out string estado)
+    {
+        nivel = -1; carregando = false; mv = 0; estado = "dormindo";
+        var h = Hid.AbrirLeitura(c.Caminho);
+        if (h.IsInvalid) { h.Dispose(); estado = "não abriu"; return false; }
+        var lidos = new List<byte[]>();
+        using (var fs = new FileStream(h, FileAccess.Read, 1, true))
+        {
+            var fim = DateTime.Now.AddMilliseconds(5000);
+            while (lidos.Count < 5)
+            {
+                int resta = (int)(fim - DateTime.Now).TotalMilliseconds;
+                if (resta <= 0) break;
+                var b = new byte[Math.Max((int)c.InLen, 5)];
+                IAsyncResult ar;
+                try { ar = fs.BeginRead(b, 0, b.Length, null, null); } catch { break; }
+                if (!ar.AsyncWaitHandle.WaitOne(resta)) break;      // fechar o arquivo cancela a leitura pendente
+                int n;
+                try { n = fs.EndRead(ar); } catch { break; }
+                int nv, m; bool cr;
+                if (n >= 4 && Decodificar(b, out nv, out cr, out m)) lidos.Add(b);
+            }
+        }
+        if (lidos.Count == 0) return false;
+        var moda = lidos.GroupBy(b => b[2] << 8 | (b[3] & 1)).OrderByDescending(gr => gr.Count()).ThenByDescending(gr => lidos.LastIndexOf(gr.Last())).First().Last();
+        Decodificar(moda, out nivel, out carregando, out mv);
+        estado = "ok";
+        return true;
+    }
+}
+
 // decodificacao das respostas de bateria (separada para poder testar com respostas gravadas)
 static class Logi
 {
@@ -1076,6 +1155,23 @@ static class Receptores
                     if (!ok) { if (estado == "dormindo") lido = true; continue; }   // dormindo: nao vai para "sem leitura"
                     var a = new Aparelho { Id = "compx:" + g.Key, Nome = string.IsNullOrEmpty(produto) || SEM_FIO.IsMatch(produto) ? "Mouse 2.4 GHz" : produto, Tipo = TipoPelaColecao(cols), Fonte = "Compx" };
                     if (a.Tipo == Tipo.Outro) a.Tipo = Tipo.Mouse;
+                    a.Valores.Add(new Valor { Rotulo = "", Nivel = n, Carregando = carr });
+                    res.Aparelhos.Add(a); lido = true; break;
+                }
+            }
+
+            // 5. Attack Shark X3 (so leitura da colecao de status)
+            if (!lido && AttackShark.Eh(c0.Vid, c0.Pid))
+            {
+                foreach (var c in cols.Where(x => x.UsagePage == 0x000A && x.InLen >= 5))
+                {
+                    int n, mv; bool carr; string estado; bool ok = false;
+                    try { ok = AttackShark.Ler(c, out n, out carr, out mv, out estado); } catch (Exception ex) { n = -1; carr = false; mv = 0; estado = "erro: " + ex.Message; }
+                    d.AppendLine(string.Format("   Attack Shark {0:X4}/{1:X4}: {2}", c.UsagePage, c.Usage,
+                        ok ? string.Format("{0}{1} ({2} mV)", n < 0 ? "--" : n + "%", carr ? " carregando" : "", mv) : estado == "dormindo" ? "mouse dormindo ou desligado" : estado));
+                    if (!ok) { if (estado == "dormindo") lido = true; continue; }
+                    // tipo fixo: a colecao de configuracao usa a pagina 0x0B e enganaria o TipoPelaColecao
+                    var a = new Aparelho { Id = "attackshark:" + c0.Vid.ToString("X4"), Nome = "Attack Shark X3", Tipo = Tipo.Mouse, Fonte = "Attack Shark" };
                     a.Valores.Add(new Valor { Rotulo = "", Nivel = n, Carregando = carr });
                     res.Aparelhos.Add(a); lido = true; break;
                 }
@@ -2105,6 +2201,14 @@ static class Testes
         Conferir("Razer resposta 0xB3 = 70%", 70, Razer.PorcentoDe(Razer.Valor(rr, 0x07, 0x80)));
         rr[1] = 0x05;
         Conferir("Razer comando não suportado", -1, Razer.Valor(rr, 0x07, 0x80));
+
+        // Attack Shark X3: aviso real do receptor 1D57:FA60 (03 10 40 01 08 = 4,00 V na bateria)
+        int an, amv; bool ac;
+        Conferir("Attack Shark aviso real 4,00 V = 70%", "70|False|4000", AttackShark.Decodificar(new byte[] { 0x03, 0x10, 0x40, 0x01, 0x08 }, out an, out ac, out amv) ? an + "|" + ac + "|" + amv : "sem leitura");
+        Conferir("Attack Shark aviso vazio descartado", false, AttackShark.Decodificar(new byte[] { 0x03, 0x10, 0x03, 0x00, 0xFF }, out an, out ac, out amv));
+        Conferir("Attack Shark cabo (5,00 V) = carregando sem %", "-1|True", AttackShark.Decodificar(new byte[] { 0x03, 0x10, 0x50, 0x00, 0x0C }, out an, out ac, out amv) ? an + "|" + ac : "sem leitura");
+        Conferir("Attack Shark 4,20 V = 100%", 100, AttackShark.PorTensao(4.2));
+        Conferir("Attack Shark 3,80 V = 35%", 35, AttackShark.PorTensao(3.8));
 
         // Compx: pedidos conferidos com o receptor 3554:F5D5 real (Redragon M916 Pro)
         Conferir("Compx pedido status", "08-03-00-00-00-00-00-00-00-00-00-00-00-00-00-00-4A", BitConverter.ToString(Compx.Montar(Compx.STATUS)));
