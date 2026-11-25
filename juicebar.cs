@@ -37,9 +37,9 @@ using Windows.Storage.Streams;
 [assembly: System.Reflection.AssemblyProduct("Juicebar")]
 [assembly: System.Reflection.AssemblyDescription("Bateria dos aparelhos sem fio na barra de tarefas")]
 [assembly: System.Reflection.AssemblyCopyright("Copyright (c) 2026 caiquebmaso - MIT")]
-[assembly: System.Reflection.AssemblyVersion("1.2.0.0")]
-[assembly: System.Reflection.AssemblyFileVersion("1.2.0.0")]
-[assembly: System.Reflection.AssemblyInformationalVersion("1.2.0")]
+[assembly: System.Reflection.AssemblyVersion("1.2.1.0")]
+[assembly: System.Reflection.AssemblyFileVersion("1.2.1.0")]
+[assembly: System.Reflection.AssemblyInformationalVersion("1.2.1")]
 
 // ================================================================ modelo
 enum Tipo { Fone, Mouse, Teclado, Controle, Outro }
@@ -1706,11 +1706,19 @@ class Widget : Form
     }
 
     // Filho da barra de tarefas, logo a esquerda do clima (ou da bandeja); encolhe a area
-    // dos botoes para abrir espaco. Refaz sozinho se o Explorer reiniciar.
+    // dos botoes para abrir espaco. Refaz sozinho se o Explorer reiniciar: a barra velha leva a
+    // nossa janela junto quando morre, entao o relogio (que nao depende da janela) cria outra
+    // assim que a barra nova aparece.
     void Encaixar()
     {
+        if (IsDisposed) return;
         IntPtr tray = N.FindWindow("Shell_TrayWnd", null);
         if (tray == IntPtr.Zero) return;
+        // barra recem-criada pelo Explorer ainda sem tamanho: espera o proximo tique
+        // (desenhar com altura 0 dava "Parametro invalido" no Bitmap)
+        N.RECT rt; N.GetWindowRect(tray, out rt);
+        if (rt.Right - rt.Left <= 0 || rt.Bottom - rt.Top <= 0 || !N.IsWindowVisible(tray)) return;
+        if (!IsHandleCreated) { CreateHandle(); barra = IntPtr.Zero; }
         if (tray != barra || N.GetParent(Handle) != tray)
         {
             N.SetParent(Handle, tray);
@@ -1721,7 +1729,6 @@ class Widget : Form
             onde = Rectangle.Empty;
         }
 
-        N.RECT rt; N.GetWindowRect(tray, out rt);
         int ancora = int.MaxValue;
         foreach (var cls in new[] { "DynamicContent2", "TrayNotifyWnd" })
         {
@@ -1755,7 +1762,7 @@ class Widget : Form
 
     void Desenhar()
     {
-        if (onde.Width <= 0) return;
+        if (onde.Width <= 0 || onde.Height <= 0) return;
         int W = onde.Width, H = onde.Height;
         using (var bmp = new Bitmap(W, H, System.Drawing.Imaging.PixelFormat.Format32bppArgb))
         {
@@ -2274,6 +2281,17 @@ static class Testes
 
 static class Programa
 {
+    static void RegistrarErro(Exception ex)
+    {
+        try
+        {
+            var arq = Path.Combine(Path.GetDirectoryName(Application.ExecutablePath), "erros.log");
+            if (File.Exists(arq) && new FileInfo(arq).Length > 200 * 1024) File.Delete(arq);
+            File.AppendAllText(arq, DateTime.Now.ToString("dd/MM/yyyy HH:mm:ss") + " " + Atualizador.Atual + "\r\n" + ex + "\r\n\r\n", System.Text.Encoding.UTF8);
+        }
+        catch { }
+    }
+
     static string Arg(string[] args, string nome)
     {
         int i = Array.FindIndex(args, a => a.Equals(nome, StringComparison.OrdinalIgnoreCase));
@@ -2320,10 +2338,15 @@ static class Programa
             Atualizador.LimparVelho();
             Coletor.Demo = args.Any(a => a.Equals("--demo", StringComparison.OrdinalIgnoreCase));
             N.SetProcessDPIAware();
+            // erro inesperado na tela: grava em erros.log ao lado do .exe e segue, sem a caixa do .NET
+            Application.SetUnhandledExceptionMode(UnhandledExceptionMode.CatchException);
+            Application.ThreadException += (s, e) => RegistrarErro(e.Exception);
             Application.EnableVisualStyles();
             var w = new Widget();
             w.Show();
-            Application.Run(w);
+            // sem formulario principal: se o Explorer cair e destruir a janela da barra, o
+            // programa continua e a janela volta sozinha (ver Encaixar). Fecha so pelo Sair.
+            Application.Run(new ApplicationContext());
         }
     }
 }
